@@ -16,11 +16,60 @@ const oauth2Client = new google.auth.OAuth2(
 oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
 const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
+/**
+ * 🔍 Busca una carpeta con nombre = parentId.
+ * Si no existe, la crea dentro de FOLDER_ID raíz.
+ */
+async function getOrCreateCaseFolder(parentId) {
+  const folderName = String(parentId).trim();
+
+  // Busca si ya existe la carpeta
+  const search = await drive.files.list({
+    q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${process.env.FOLDER_ID}' in parents and trashed=false`,
+    fields: 'files(id, name)',
+    spaces: 'drive'
+  });
+
+  if (search.data.files.length > 0) {
+    return search.data.files[0].id;
+  }
+
+  // Si no existe, crea la carpeta
+  const folderMetadata = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [process.env.FOLDER_ID]
+  };
+
+  const folder = await drive.files.create({
+    resource: folderMetadata,
+    fields: 'id'
+  });
+
+  // Hace pública la carpeta
+  await drive.permissions.create({
+    fileId: folder.data.id,
+    requestBody: {
+      role: 'reader',
+      type: 'anyone'
+    }
+  });
+
+  return folder.data.id;
+}
+
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
+    const parentId = req.body.parentId;
+    if (!parentId) {
+      return res.status(400).json({ error: 'parentId requerido' });
+    }
+
+    const caseFolderId = await getOrCreateCaseFolder(parentId);
+
     const fileMetadata = {
       name: req.file.originalname,
-      parents: [process.env.FOLDER_ID]
+      parents: [caseFolderId]
     };
 
     const media = {
@@ -28,22 +77,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       body: fs.createReadStream(req.file.path)
     };
 
-    const response = await drive.files.create({
+    await drive.files.create({
       resource: fileMetadata,
       media,
-      fields: 'id, webViewLink'
+      fields: 'id'
     });
 
-    // Hace público el archivo
-    await drive.permissions.create({
-      fileId: response.data.id,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone'
-      }
-    });
+    const folderUrl = `https://drive.google.com/drive/folders/${caseFolderId}`;
+    res.json({ url: folderUrl });
 
-    res.json({ url: response.data.webViewLink });
   } catch (error) {
     console.error('❌ Error al subir:', error.message);
     res.status(500).send('Error al subir archivo');
