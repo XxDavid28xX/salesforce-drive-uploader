@@ -17,13 +17,12 @@ oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
 const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
 /**
- * 🔍 Busca una carpeta con nombre = parentId.
- * Si no existe, la crea dentro de FOLDER_ID raíz.
+ * 🔍 Busca una carpeta con nombre = parentId (ej. Id del caso).
+ * Si no existe, la crea dentro de la carpeta raíz (FOLDER_ID).
  */
 async function getOrCreateCaseFolder(parentId) {
   const folderName = String(parentId).trim();
 
-  // Busca si ya existe la carpeta
   const search = await drive.files.list({
     q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${process.env.FOLDER_ID}' in parents and trashed=false`,
     fields: 'files(id, name)',
@@ -34,7 +33,6 @@ async function getOrCreateCaseFolder(parentId) {
     return search.data.files[0].id;
   }
 
-  // Si no existe, crea la carpeta
   const folderMetadata = {
     name: folderName,
     mimeType: 'application/vnd.google-apps.folder',
@@ -46,7 +44,6 @@ async function getOrCreateCaseFolder(parentId) {
     fields: 'id'
   });
 
-  // Hace pública la carpeta
   await drive.permissions.create({
     fileId: folder.data.id,
     requestBody: {
@@ -77,10 +74,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       body: fs.createReadStream(req.file.path)
     };
 
-    await drive.files.create({
+    const uploaded = await drive.files.create({
       resource: fileMetadata,
       media,
       fields: 'id'
+    });
+
+    // Elimina el archivo temporal de la carpeta uploads/
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.error('⚠️ No se pudo eliminar archivo temporal:', err.message);
     });
 
     const folderUrl = `https://drive.google.com/drive/folders/${caseFolderId}`;
