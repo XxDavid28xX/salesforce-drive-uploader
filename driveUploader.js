@@ -1,16 +1,17 @@
-// Middleware con logs detallados y trazabilidad exhaustiva para subir archivos a Google Drive
-
 const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
 const { google } = require('googleapis');
 const fs = require('fs');
 const mime = require('mime-types');
+const path = require('path');
 require('dotenv').config();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
+
+app.use(express.json({ limit: '50mb' })); // Soporta payloads grandes
 
 // Autenticación con Google OAuth2
 const oauth2Client = new google.auth.OAuth2(
@@ -37,23 +38,11 @@ async function withRetries(fn, retries = 3, delay = 1000, label = 'Operación') 
   }
 }
 
-// Crear o buscar carpeta para el caso
-async function getOrCreateCaseFolder(parentId) {
+// Crear carpeta para el caso (sin buscar, solo crea)
+async function createCaseFolder(parentId) {
   const folderName = String(parentId).trim();
   try {
-    console.log(`🔍 Buscando carpeta para caso: ${folderName}`);
-    const search = await drive.files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${process.env.FOLDER_ID}' in parents and trashed=false`,
-      fields: 'files(id, name)',
-      spaces: 'drive'
-    });
-
-    if (search.data.files.length > 0) {
-      console.log(`📂 Carpeta encontrada para caso ${parentId}: ${search.data.files[0].id}`);
-      return search.data.files[0].id;
-    }
-
-    console.log(`📁 Carpeta no encontrada. Creando nueva carpeta para caso: ${parentId}`);
+    console.log(`📁 Creando nueva carpeta para caso: ${folderName}`);
     const folder = await drive.files.create({
       resource: {
         name: folderName,
@@ -74,12 +63,25 @@ async function getOrCreateCaseFolder(parentId) {
     console.log(`🆕 Carpeta creada para caso ${parentId}: ${folder.data.id}`);
     return folder.data.id;
   } catch (error) {
-    console.error(`❌ Error creando/obteniendo carpeta para caso ${parentId}:`, error.message);
+    console.error(`❌ Error creando carpeta para caso ${parentId}:`, error.message);
     throw error;
   }
 }
 
-// Endpoint para subida desde formulario
+// Genera archivo CSV con los casos procesados
+function generarCSVProcesados(okList, failList) {
+  const now = new Date().toISOString().replace(/[:.]/g, '-');
+  const csvPath = path.join(__dirname, `upload-summary-${now}.csv`);
+  const lines = [
+    'CaseNumber,Status',
+    ...okList.map(num => `"${num}",OK`),
+    ...failList.map(num => `"${num}",ERROR`)
+  ];
+  fs.writeFileSync(csvPath, lines.join('\n'));
+  return csvPath;
+}
+
+// Endpoint para subida desde formulario (no cambia, carpeta se crea siempre para un solo archivo)
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /upload recibida');
@@ -89,7 +91,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'parentId requerido' });
     }
 
-    const caseFolderId = await getOrCreateCaseFolder(parentId);
+    const caseFolderId = await createCaseFolder(parentId);
 
     const fileMetadata = {
       name: req.file.originalname,
@@ -130,72 +132,114 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Endpoint para Salesforce
+// Endpoint para Salesforce - Recibe varios archivos de un caso
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforce recibida');
+    // Espera: { caseNumber, accessToken, files: [{ fileId, type }] }
     let data = '';
     req.on('data', chunk => { data += chunk; });
 
     req.on('end', async () => {
       console.log(`🧾 Payload recibido: ${data}`);
-      const { fileId, type, caseNumber, accessToken } = JSON.parse(data);
+      const { caseNumber, accessToken, files } = JSON.parse(data);
 
-      if (!fileId || !type || !caseNumber || !accessToken) {
+      if (!caseNumber || !accessToken || !Array.isArray(files)) {
         console.warn('⚠️ Parámetros faltantes en payload');
-        return res.status(400).json({ error: 'Faltan parámetros requeridos' });
+        return res.status(400).json({ error: 'Faltan parámetros requeridos (caseNumber, accessToken, files)' });
       }
 
-      const sfUrl = type === 'attachment'
-        ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${fileId}/Body`
-        : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
+      let todosOk = true;
+      let archivosOk = [];
+      let archivosFail = [];
 
-      console.log(`🔗 Descargando archivo desde Salesforce: ${sfUrl}`);
+      // 1. Intenta descargar todos los archivos
+      let fileDatas = [];
+      for (let file of files) {
+        try {
+          const sfUrl = file.type === 'attachment'
+            ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${file.fileId}/Body`
+            : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${file.fileId}/VersionData`;
 
-      const sfRes = await withRetries(() =>
-        fetch(sfUrl, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }).then(async response => {
-          if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          return { buffer, mimeType: response.headers.get('content-type') };
-        }), 3, 1000, 'Descarga Salesforce'
-      );
+          console.log(`🔗 Descargando archivo desde Salesforce: ${sfUrl}`);
 
-      const ext = mime.extension(sfRes.mimeType) || 'bin';
-      const fileName = `${fileId}.${ext}`;
-      const caseFolderId = await getOrCreateCaseFolder(caseNumber);
+          const sfRes = await withRetries(() =>
+            fetch(sfUrl, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${accessToken}` }
+            }).then(async response => {
+              if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              return { buffer, mimeType: response.headers.get('content-type'), fileId: file.fileId, type: file.type };
+            }), 3, 1000, `Descarga Salesforce (${file.fileId})`
+          );
+          fileDatas.push(sfRes);
+          archivosOk.push(file.fileId);
+        } catch (err) {
+          todosOk = false;
+          archivosFail.push(file.fileId);
+          console.error(`❌ Error al descargar archivo ${file.fileId}:`, err.message);
+        }
+      }
 
-      console.log(`📁 Subiendo a Drive como ${fileName}...`);
+      // 2. Si todos se descargaron bien, crea la carpeta y sube todo
+      let caseFolderId = null;
+      let uploadResults = [];
+      if (todosOk && fileDatas.length > 0) {
+        caseFolderId = await createCaseFolder(caseNumber);
 
-      const uploaded = await withRetries(() =>
-        drive.files.create({
-          resource: {
-            name: fileName,
-            parents: [caseFolderId]
-          },
-          media: {
-            mimeType: sfRes.mimeType,
-            body: Readable.from(sfRes.buffer)
-          },
-          fields: 'id, webViewLink'
-        }), 3, 1000, 'Subida Google Drive'
-      );
+        for (let f of fileDatas) {
+          try {
+            const ext = mime.extension(f.mimeType) || 'bin';
+            const fileName = `${f.fileId}.${ext}`;
+            console.log(`📁 Subiendo a Drive como ${fileName}...`);
+            const uploaded = await withRetries(() =>
+              drive.files.create({
+                resource: {
+                  name: fileName,
+                  parents: [caseFolderId]
+                },
+                media: {
+                  mimeType: f.mimeType,
+                  body: Readable.from(f.buffer)
+                },
+                fields: 'id, webViewLink'
+              }), 3, 1000, `Subida Google Drive (${fileName})`
+            );
+            uploadResults.push({ fileId: f.fileId, status: 'OK', driveId: uploaded.data.id, link: uploaded.data.webViewLink });
+            console.log(`✅ Archivo ${fileName} subido a Drive correctamente`);
+          } catch (err) {
+            todosOk = false;
+            archivosFail.push(f.fileId);
+            uploadResults.push({ fileId: f.fileId, status: 'ERROR', error: err.message });
+            console.error(`❌ Error al subir archivo ${f.fileId} a Drive:`, err.message);
+          }
+        }
+      } else {
+        console.warn('⚠️ No se creará la carpeta porque uno o más archivos fallaron al descargarse');
+      }
 
-      console.log(`✅ Archivo ${fileName} del caso ${caseNumber} subido exitosamente a Drive`);
+      // 3. Generar archivo CSV de resultados (si hay algún archivo ok o fail)
+      let csvPath = null;
+      if (archivosOk.length > 0 || archivosFail.length > 0) {
+        csvPath = generarCSVProcesados(archivosOk, archivosFail);
+        console.log(`📋 Resumen de archivos generado: ${csvPath}`);
+      }
+
       res.json({
-        url: uploaded.data.webViewLink,
-        driveId: uploaded.data.id,
-        fileName,
-        caseNumber
+        folderCreated: !!caseFolderId,
+        driveFolderId: caseFolderId,
+        uploadResults,
+        summaryCsv: csvPath ? path.basename(csvPath) : null,
+        archivosOk,
+        archivosFail
       });
     });
 
   } catch (err) {
     console.error('❌ Error general en /uploadFromSalesforce:', err.message);
-    res.status(500).json({ error: 'Error al subir archivo desde Salesforce' });
+    res.status(500).json({ error: 'Error al subir archivos desde Salesforce', detalle: err.message });
   }
 });
 
