@@ -9,7 +9,7 @@ async function withRetries(fn, retries = 3, delay = 1000) {
     }
   }
 }
-
+const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
 const { google } = require('googleapis');
@@ -143,7 +143,7 @@ app.post('/uploadFromSalesforce', async (req, res) => {
           },
           media: {
             mimeType: sfRes.mimeType,
-            body: Buffer.from(sfRes.buffer)
+            body: Readable.from(sfRes.buffer)
           },
           fields: 'webViewLink'
         })
