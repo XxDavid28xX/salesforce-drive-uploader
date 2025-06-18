@@ -9,6 +9,7 @@ async function withRetries(fn, retries = 3, delay = 1000) {
     }
   }
 }
+
 const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
@@ -105,6 +106,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     res.status(500).send('Error al subir archivo');
   }
 });
+
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
     let data = '';
@@ -125,7 +127,8 @@ app.post('/uploadFromSalesforce', async (req, res) => {
         fetch(sfUrl, { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } })
           .then(async response => {
             if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-            const buffer = await response.buffer();
+            const arrayBuffer = await response.arrayBuffer(); // ✅ reemplazo recomendado
+            const buffer = Buffer.from(arrayBuffer);           // ✅ para usarlo en el stream
             return { buffer, mimeType: response.headers.get('content-type') };
           })
       );
@@ -143,7 +146,7 @@ app.post('/uploadFromSalesforce', async (req, res) => {
           },
           media: {
             mimeType: sfRes.mimeType,
-            body: Readable.from(sfRes.buffer)
+            body: Readable.from(sfRes.buffer) // ✅ para Google Drive compatible
           },
           fields: 'webViewLink'
         })
