@@ -3,7 +3,7 @@ const multer = require('multer');
 const { google } = require('googleapis');
 const fs = require('fs');
 require('dotenv').config();
-
+const fetch = require('node-fetch');
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
@@ -91,6 +91,57 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('❌ Error al subir:', error.message);
     res.status(500).send('Error al subir archivo');
+  }
+});
+app.post('/uploadFromSalesforce', async (req, res) => {
+  try {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', async () => {
+      const { fileId, type, caseNumber, accessToken } = JSON.parse(data);
+
+      if (!fileId || !type || !caseNumber || !accessToken) {
+        return res.status(400).json({ error: 'Faltan parámetros requeridos' });
+      }
+
+      const sfUrl = type === 'attachment'
+        ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${fileId}/Body`
+        : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
+
+      const sfRes = await fetch(sfUrl, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      if (!sfRes.ok) {
+        return res.status(sfRes.status).json({ error: 'Falla al descargar archivo desde Salesforce' });
+      }
+
+      const buffer = await sfRes.buffer();
+      const mimeType = sfRes.headers.get('content-type');
+      const ext = require('mime-types').extension(mimeType);
+      const fileName = `${fileId}.${ext}`;
+
+      const caseFolderId = await getOrCreateCaseFolder(caseNumber);
+
+      const uploaded = await drive.files.create({
+        resource: {
+          name: fileName,
+          parents: [caseFolderId]
+        },
+        media: {
+          mimeType,
+          body: Buffer.from(buffer)
+        },
+        fields: 'webViewLink'
+      });
+
+      res.json({ url: uploaded.data.webViewLink });
+    });
+
+  } catch (err) {
+    console.error('❌ Error en uploadFromSalesforce:', err.message);
+    res.status(500).json({ error: 'Error en middleware al subir archivo grande' });
   }
 });
 
