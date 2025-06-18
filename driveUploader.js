@@ -1,3 +1,15 @@
+async function withRetries(fn, retries = 3, delay = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      console.warn(`⚠️ Intento ${attempt} fallido: ${err.message}`);
+      if (attempt < retries) await new Promise(r => setTimeout(r, delay * attempt));
+      else throw err;
+    }
+  }
+}
+
 const express = require('express');
 const multer = require('multer');
 const { google } = require('googleapis');
@@ -108,40 +120,41 @@ app.post('/uploadFromSalesforce', async (req, res) => {
         ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${fileId}/Body`
         : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
 
-      const sfRes = await fetch(sfUrl, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
+      // ⏳ Descargar desde Salesforce con reintentos
+      const sfRes = await withRetries(() =>
+        fetch(sfUrl, { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } })
+          .then(async response => {
+            if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+            const buffer = await response.buffer();
+            return { buffer, mimeType: response.headers.get('content-type') };
+          })
+      );
 
-      if (!sfRes.ok) {
-        return res.status(sfRes.status).json({ error: 'Falla al descargar archivo desde Salesforce' });
-      }
-
-      const buffer = await sfRes.buffer();
-      const mimeType = sfRes.headers.get('content-type');
-      const ext = require('mime-types').extension(mimeType);
+      const ext = require('mime-types').extension(sfRes.mimeType) || 'bin';
       const fileName = `${fileId}.${ext}`;
-
       const caseFolderId = await getOrCreateCaseFolder(caseNumber);
 
-      const uploaded = await drive.files.create({
-        resource: {
-          name: fileName,
-          parents: [caseFolderId]
-        },
-        media: {
-          mimeType,
-          body: Buffer.from(buffer)
-        },
-        fields: 'webViewLink'
-      });
+      // ⬆️ Subida a Google Drive con reintentos
+      const uploaded = await withRetries(() =>
+        drive.files.create({
+          resource: {
+            name: fileName,
+            parents: [caseFolderId]
+          },
+          media: {
+            mimeType: sfRes.mimeType,
+            body: Buffer.from(sfRes.buffer)
+          },
+          fields: 'webViewLink'
+        })
+      );
 
       res.json({ url: uploaded.data.webViewLink });
     });
 
   } catch (err) {
     console.error('❌ Error en uploadFromSalesforce:', err.message);
-    res.status(500).json({ error: 'Error en middleware al subir archivo grande' });
+    res.status(500).json({ error: 'Error al subir archivo grande (con retries)' });
   }
 });
 
