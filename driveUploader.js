@@ -111,7 +111,12 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error al subir archivo desde formulario:', error.message);
-    res.status(500).send('Error al subir archivo');
+    res.status(500).json({
+  error: 'Falló la subida del archivo',
+  detalle: err.message,
+  fileId: req.body?.fileId,
+  caseNumber: req.body?.caseNumber
+});
   }
 });
 
