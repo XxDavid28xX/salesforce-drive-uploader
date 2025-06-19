@@ -36,11 +36,27 @@ async function withRetries(fn, retries = 3, delay = 1000, label = 'Operación') 
   }
 }
 
-// Crear o buscar carpeta para el caso
+// Crear o buscar carpeta para el caso (con búsqueda antes de crear)
 async function createCaseFolder(parentId) {
-  const folderName = String(parentId).trim();
+  const folderName = String(parentId || '').trim();
+  if (!folderName) throw new Error('parentId inválido para carpeta');
+
   try {
-    console.log(`📁 Creando nueva carpeta para caso: ${folderName}`);
+    console.log(`🔍 Buscando carpeta existente para caso: "${folderName}"`);
+    const search = await drive.files.list({
+      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${process.env.FOLDER_ID}' in parents and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive'
+    });
+
+    if (search.data.files.length > 0) {
+      const foundId = search.data.files[0].id;
+      console.log(`📂 Carpeta ya existe para caso "${folderName}": ${foundId}`);
+      return foundId;
+    }
+
+    // Si no existe, la creas
+    console.log(`📁 Carpeta NO encontrada, creando nueva para caso: "${folderName}"`);
     const folder = await drive.files.create({
       resource: {
         name: folderName,
@@ -58,10 +74,10 @@ async function createCaseFolder(parentId) {
       }
     });
 
-    console.log(`🆕 Carpeta creada para caso ${parentId}: ${folder.data.id}`);
+    console.log(`🆕 Carpeta creada para caso "${folderName}": ${folder.data.id}`);
     return folder.data.id;
   } catch (error) {
-    console.error(`❌ Error creando carpeta para caso ${parentId}:`, error.message);
+    console.error(`❌ Error creando/obteniendo carpeta para caso "${folderName}":`, error.message);
     throw error;
   }
 }
