@@ -158,7 +158,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         const ext = mime.extension(sfRes.mimeType) || 'bin';
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = nombreDesdeSalesforce || `${fileId}.${ext}`;
+        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) ? nombreDesdeSalesforce : `${nombreDesdeSalesforce || fileId}.${ext}`;
         file.status = 'SUCCESS';
 
         resultados.push({
