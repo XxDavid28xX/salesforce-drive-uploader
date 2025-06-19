@@ -111,7 +111,17 @@ function generarCSV(resultados) {
   return encabezado + filas;
 }
 
-// Endpoint para subir lote de archivos de un caso
+const { Readable } = require('stream');
+const fs = require('fs');
+
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 app.post('/uploadFromSalesforceLote', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforceLote recibida');
@@ -155,10 +165,10 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           }), 3, 1000, `Descarga Salesforce ${fileId}`
         );
 
-        // 🔴 AQUÍ el cambio clave: siempre respeta el nombre recibido de Salesforce
+        const ext = mime.extension(sfRes.mimeType) || 'bin';
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = nombreDesdeSalesforce || `${fileId}.${mime.extension(sfRes.mimeType) || 'bin'}`;
+        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) ? nombreDesdeSalesforce : `${nombreDesdeSalesforce || fileId}.${ext}`;
         file.status = 'SUCCESS';
 
         resultados.push({
@@ -211,10 +221,35 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       }
     }
 
-    // 3️⃣ Subir log CSV al folder general de errores (siempre)
-    const csv = generarCSV(resultados);
+    // 3️⃣ Actualiza/crea log_general.csv con todos los resultados
+    const generalLogFileName = 'log_general.csv';
+    let contenidoPrevio = '';
+    let logFileId = null;
+
     if (erroresFolder) {
-      const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), erroresFolder, `log_${caseNumber}.csv`);
+      // Buscar si ya existe el log_general.csv
+      const generalLogs = await drive.files.list({
+        q: `name='${generalLogFileName}' and '${erroresFolder}' in parents and trashed=false`,
+        fields: 'files(id)',
+        spaces: 'drive'
+      });
+      if (generalLogs.data.files.length > 0) {
+        logFileId = generalLogs.data.files[0].id;
+        // Descargar contenido previo
+        const resp = await drive.files.get({ fileId: logFileId, alt: 'media' }, { responseType: 'stream' });
+        contenidoPrevio = await streamToString(resp.data);
+        // Eliminar archivo anterior antes de sobrescribir
+        await drive.files.delete({ fileId: logFileId });
+      }
+
+      // Junta el nuevo log (sin duplicar encabezado)
+      const encabezado = 'fileName,caseNumber,status,error\n';
+      const filasNuevas = generarCSV(resultados).replace(encabezado, '');
+      const nuevoContenido = contenidoPrevio
+        ? (contenidoPrevio.endsWith('\n') ? contenidoPrevio : contenidoPrevio + '\n') + filasNuevas
+        : encabezado + filasNuevas;
+
+      const uploaded = await subirArchivoBufferDrive(Buffer.from(nuevoContenido, 'utf-8'), erroresFolder, generalLogFileName);
       logDriveLink = uploaded.data.webViewLink;
     }
 
