@@ -252,12 +252,14 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
 
     // 4️⃣ Devolver respuesta
     res.status(todosExito ? 200 : 207).json({
-      status: todosExito ? 'OK' : 'INCOMPLETE',
-      folderId,
-      folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
-      logFile: logDriveLink,
-      resultados
-    });
+  status: todosExito ? 'OK' : 'INCOMPLETE',
+  success: todosExito, // <-- AGREGA ESTO
+  folderId,
+  folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
+  logFile: logDriveLink,
+  resultados
+});
+
 
   } catch (err) {
     console.error('❌ Error general en /uploadFromSalesforceLote:', err.message);
