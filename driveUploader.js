@@ -181,11 +181,13 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     }
 
     const todosExito = resultados.every(r => r.status === 'SUCCESS');
+    const erroresFolder = process.env.ERRORES_FOLDER_ID;
     let logDriveLink = null;
+    let folderId = null;
 
-    // 2️⃣ Subida si todos son válidos
+    // 2️⃣ Si todos son válidos, crear carpeta y subir archivos
     if (todosExito) {
-      const folderId = await createCaseFolder(caseNumber);
+      folderId = await createCaseFolder(caseNumber);
 
       for (const file of files) {
         try {
@@ -207,44 +209,30 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           console.error(`❌ Error subiendo ${file.fileName} después de la carpeta creada:`, e.message);
         }
       }
-
-      // 3️⃣ Subir log CSV al mismo folder
-      const csv = generarCSV(resultados);
-      const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), folderId, `log_${caseNumber}.csv`);
-      logDriveLink = uploaded.data.webViewLink;
-
-      // 4️⃣ Devolver respuesta con folderUrl
-      res.json({
-        status: 'OK',
-        folderId,
-        folderUrl: `https://drive.google.com/drive/folders/${folderId}`, // ✅ Este es clave para Apex
-        logFile: logDriveLink,
-        resultados
-      });
-
-    } else {
-      // 5️⃣ Subida fallida parcial - solo log
-      const erroresFolder = process.env.ERRORES_FOLDER_ID;
-      const csv = generarCSV(resultados);
-      if (erroresFolder) {
-        const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), erroresFolder, `error_${caseNumber}.csv`);
-        logDriveLink = uploaded.data.webViewLink;
-      }
-
-      res.status(207).json({
-        status: 'INCOMPLETE',
-        folderId: null,
-        folderUrl: null,
-        logFile: logDriveLink,
-        resultados
-      });
     }
+
+    // 3️⃣ Subir log CSV al folder general de errores (siempre)
+    const csv = generarCSV(resultados);
+    if (erroresFolder) {
+      const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), erroresFolder, `log_${caseNumber}.csv`);
+      logDriveLink = uploaded.data.webViewLink;
+    }
+
+    // 4️⃣ Devolver respuesta
+    res.status(todosExito ? 200 : 207).json({
+      status: todosExito ? 'OK' : 'INCOMPLETE',
+      folderId,
+      folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
+      logFile: logDriveLink,
+      resultados
+    });
 
   } catch (err) {
     console.error('❌ Error general en /uploadFromSalesforceLote:', err.message);
     res.status(500).json({ error: 'Error en batch de subida de archivos', detalle: err.message });
   }
 });
+
 
 // Otros endpoints (uno a uno o formulario) SIN cambios, solo logs y legacy
 app.post('/upload', upload.single('file'), async (req, res) => {
