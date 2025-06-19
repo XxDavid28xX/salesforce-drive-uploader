@@ -155,10 +155,10 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           }), 3, 1000, `Descarga Salesforce ${fileId}`
         );
 
-        const ext = mime.extension(sfRes.mimeType) || 'bin';
+        // 🔴 AQUÍ el cambio clave: siempre respeta el nombre recibido de Salesforce
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) ? nombreDesdeSalesforce : `${nombreDesdeSalesforce || fileId}.${ext}`;
+        file.fileName = nombreDesdeSalesforce || `${fileId}.${mime.extension(sfRes.mimeType) || 'bin'}`;
         file.status = 'SUCCESS';
 
         resultados.push({
