@@ -233,7 +233,6 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
   }
 });
 
-
 // Otros endpoints (uno a uno o formulario) SIN cambios, solo logs y legacy
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
