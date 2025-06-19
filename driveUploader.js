@@ -11,7 +11,7 @@ const app = express();
 app.use(express.json({ limit: '50mb' })); // Por si mandas JSON grande de archivos
 const upload = multer({ dest: 'uploads/' });
 
-// Autenticación con Google OAuth2
+// Autenticación con Google OAuth2 
 const oauth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
   process.env.CLIENT_SECRET,
@@ -124,9 +124,9 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
 
     const resultados = [];
 
-    // Intentar descargar y validar todos los archivos antes de crear carpeta
+    // 1️⃣ Validar y descargar todos los archivos primero
     for (const file of files) {
-      const { fileId, type } = file;
+      const { fileId, type, fileName: nombreDesdeSalesforce } = file;
       if (!fileId || !type) {
         resultados.push({
           fileName: fileId || 'UNKNOWN',
@@ -155,16 +155,19 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           }), 3, 1000, `Descarga Salesforce ${fileId}`
         );
 
+        const ext = mime.extension(sfRes.mimeType) || 'bin';
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = `${fileId}.${mime.extension(sfRes.mimeType) || 'bin'}`;
+        file.fileName = nombreDesdeSalesforce || `${fileId}.${ext}`;
         file.status = 'SUCCESS';
+
         resultados.push({
           fileName: file.fileName,
           caseNumber,
           status: 'SUCCESS',
           error: null
         });
+
       } catch (e) {
         resultados.push({
           fileName: fileId,
@@ -177,12 +180,13 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       }
     }
 
-    // Si todos éxito, creas la carpeta y subes todos
     const todosExito = resultados.every(r => r.status === 'SUCCESS');
     let logDriveLink = null;
 
+    // 2️⃣ Subida si todos son válidos
     if (todosExito) {
       const folderId = await createCaseFolder(caseNumber);
+
       for (const file of files) {
         try {
           console.log(`📁 Subiendo ${file.fileName} a Drive...`);
@@ -203,27 +207,34 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           console.error(`❌ Error subiendo ${file.fileName} después de la carpeta creada:`, e.message);
         }
       }
-      // Subir log a la misma carpeta
+
+      // 3️⃣ Subir log CSV al mismo folder
       const csv = generarCSV(resultados);
       const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), folderId, `log_${caseNumber}.csv`);
       logDriveLink = uploaded.data.webViewLink;
+
+      // 4️⃣ Devolver respuesta con folderUrl
       res.json({
         status: 'OK',
         folderId,
+        folderUrl: `https://drive.google.com/drive/folders/${folderId}`, // ✅ Este es clave para Apex
         logFile: logDriveLink,
         resultados
       });
+
     } else {
-      // Subir CSV a una carpeta de errores, si quieres
+      // 5️⃣ Subida fallida parcial - solo log
       const erroresFolder = process.env.ERRORES_FOLDER_ID;
       const csv = generarCSV(resultados);
       if (erroresFolder) {
         const uploaded = await subirArchivoBufferDrive(Buffer.from(csv, 'utf-8'), erroresFolder, `error_${caseNumber}.csv`);
         logDriveLink = uploaded.data.webViewLink;
       }
+
       res.status(207).json({
         status: 'INCOMPLETE',
         folderId: null,
+        folderUrl: null,
         logFile: logDriveLink,
         resultados
       });
