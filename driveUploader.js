@@ -111,9 +111,6 @@ function generarCSV(resultados) {
   return encabezado + filas;
 }
 
-const { Readable } = require('stream');
-const fs = require('fs');
-
 async function streamToString(stream) {
   const chunks = [];
   for await (const chunk of stream) {
