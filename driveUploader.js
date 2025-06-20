@@ -22,10 +22,14 @@ const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
 async function obtenerAccessTokenSalesforce() {
   const params = new URLSearchParams();
-  params.append('grant_type', 'refresh_token');
+  params.append('grant_type', 'refresh_token');  // o "authorization_code" si usas ese flujo
   params.append('client_id', process.env.CLIENT_ID_SF);
   params.append('client_secret', process.env.CLIENT_SECRET_SF);
+  // si usas refresh_token:
   params.append('refresh_token', process.env.REFRESH_TOKEN_SF);
+  // si usas código de autorización:
+  // params.append('redirect_uri', process.env.REDIRECT_URI_SF);
+  // params.append('code', tuCódigo);
 
   const response = await fetch(`${process.env.SF_INSTANCE_URL}/services/oauth2/token`, {
     method: 'POST',
@@ -34,7 +38,7 @@ async function obtenerAccessTokenSalesforce() {
   });
 
   if (!response.ok) {
-    throw new Error(`❌ Falló la autenticación con Salesforce: ${response.status}`);
+    throw new Error(`❌ Falló autenticación Salesforce: ${response.status}`);
   }
 
   const json = await response.json();
