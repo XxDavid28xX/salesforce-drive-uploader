@@ -20,6 +20,27 @@ const oauth2Client = new google.auth.OAuth2(
 oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
 const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
+async function obtenerAccessTokenSalesforce() {
+  const params = new URLSearchParams();
+  params.append('grant_type', 'refresh_token');
+  params.append('client_id', process.env.CLIENT_ID);
+  params.append('client_secret', process.env.CLIENT_SECRET);
+  params.append('refresh_token', process.env.REFRESH_TOKEN);
+
+  const response = await fetch('https://login.salesforce.com/services/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params
+  });
+
+  if (!response.ok) {
+    throw new Error(`❌ Falló la autenticación con Salesforce: ${response.status}`);
+  }
+
+  const json = await response.json();
+  return json.access_token;
+}
+
 // Función de reintento con logs extendidos
 async function withRetries(fn, retries = 3, delay = 1000, label = 'Operación') {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -153,7 +174,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         const sfRes = await withRetries(() =>
           fetch(sfUrl, {
             method: 'GET',
-            headers: { Authorization: `Bearer ${accessToken}` }
+            const salesforceToken = await obtenerAccessTokenSalesforce(); headers: { Authorization: `Bearer ${salesforceToken}` }
           }).then(async response => {
             if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
             const arrayBuffer = await response.arrayBuffer();
@@ -347,7 +368,7 @@ app.post('/uploadFromSalesforce', async (req, res) => {
       const sfRes = await withRetries(() =>
         fetch(sfUrl, {
           method: 'GET',
-          headers: { Authorization: `Bearer ${accessToken}` }
+          const salesforceToken = await obtenerAccessTokenSalesforce(); headers: { Authorization: `Bearer ${salesforceToken}` }
         }).then(async response => {
           if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
           const arrayBuffer = await response.arrayBuffer();
