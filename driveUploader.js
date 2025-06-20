@@ -11,13 +11,13 @@ const app = express();
 app.use(express.json({ limit: '50mb' })); // Por si mandas JSON grande de archivos
 const upload = multer({ dest: 'uploads/' });
  
-// Autenticación con Google OAuth2 
+// Autenticación con Google OAuth2 (ajustada para usar variables específicas)
 const oauth2Client = new google.auth.OAuth2(
-  process.env.CLIENT_ID,
-  process.env.CLIENT_SECRET,
-  process.env.REDIRECT_URI
+  process.env.CLIENT_ID_GOOGLE,
+  process.env.CLIENT_SECRET_GOOGLE,
+  process.env.REDIRECT_URI_GOOGLE
 );
-oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
+oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN_GOOGLE });
 const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
 async function obtenerAccessTokenSalesforce() {
