@@ -319,6 +319,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint legacy uno a uno (no soporta lógica de lote ni CSV)
+// Endpoint legacy uno a uno (no soporta lógica de lote ni CSV)
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforce recibida');
@@ -327,7 +328,7 @@ app.post('/uploadFromSalesforce', async (req, res) => {
 
     req.on('end', async () => {
       console.log(`🧾 Payload recibido: ${data}`);
-      const { fileId, type, caseNumber, accessToken } = JSON.parse(data);
+      const { fileId, type, caseNumber, accessToken, fileName: nombreDesdeSalesforce } = JSON.parse(data);
 
       if (!fileId || !type || !caseNumber || !accessToken) {
         console.warn('⚠️ Parámetros faltantes en payload');
@@ -353,7 +354,10 @@ app.post('/uploadFromSalesforce', async (req, res) => {
       );
 
       const ext = mime.extension(sfRes.mimeType) || 'bin';
-      const fileName = `${fileId}.${ext}`;
+      const fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`)
+        ? nombreDesdeSalesforce
+        : `${nombreDesdeSalesforce || fileId}.${ext}`;
+
       const caseFolderId = await createCaseFolder(caseNumber);
 
       console.log(`📁 Subiendo a Drive como ${fileName}...`);
@@ -386,6 +390,7 @@ app.post('/uploadFromSalesforce', async (req, res) => {
     res.status(500).json({ error: 'Error al subir archivo desde Salesforce' });
   }
 });
+
 
 app.get('/', (req, res) => {
   res.send('✅ Middleware activo y escuchando');
