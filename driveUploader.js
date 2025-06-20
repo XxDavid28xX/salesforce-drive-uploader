@@ -165,8 +165,15 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         const ext = mime.extension(sfRes.mimeType) || 'bin';
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) ? nombreDesdeSalesforce : `${nombreDesdeSalesforce || fileId}.${ext}`;
+        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) 
+          ? nombreDesdeSalesforce 
+          : `${nombreDesdeSalesforce || fileId}.${ext}`;
         file.status = 'SUCCESS';
+
+        // ✅ Forzar mimeType correcto si es PDF
+        if (file.fileName.toLowerCase().endsWith('.pdf')) {
+          file.mimeType = 'application/pdf';
+        }
 
         resultados.push({
           fileName: file.fileName,
@@ -224,7 +231,6 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     let logFileId = null;
 
     if (erroresFolder) {
-      // Buscar si ya existe el log_general.csv
       const generalLogs = await drive.files.list({
         q: `name='${generalLogFileName}' and '${erroresFolder}' in parents and trashed=false`,
         fields: 'files(id)',
@@ -232,14 +238,11 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       });
       if (generalLogs.data.files.length > 0) {
         logFileId = generalLogs.data.files[0].id;
-        // Descargar contenido previo
         const resp = await drive.files.get({ fileId: logFileId, alt: 'media' }, { responseType: 'stream' });
         contenidoPrevio = await streamToString(resp.data);
-        // Eliminar archivo anterior antes de sobrescribir
         await drive.files.delete({ fileId: logFileId });
       }
 
-      // Junta el nuevo log (sin duplicar encabezado)
       const encabezado = 'fileName,caseNumber,status,error\n';
       const filasNuevas = generarCSV(resultados).replace(encabezado, '');
       const nuevoContenido = contenidoPrevio
@@ -252,20 +255,20 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
 
     // 4️⃣ Devolver respuesta
     res.status(todosExito ? 200 : 207).json({
-  status: todosExito ? 'OK' : 'INCOMPLETE',
-  success: todosExito, // <-- AGREGA ESTO
-  folderId,
-  folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
-  logFile: logDriveLink,
-  resultados
-});
-
+      status: todosExito ? 'OK' : 'INCOMPLETE',
+      success: todosExito, // <-- AGREGA ESTO
+      folderId,
+      folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
+      logFile: logDriveLink,
+      resultados
+    });
 
   } catch (err) {
     console.error('❌ Error general en /uploadFromSalesforceLote:', err.message);
     res.status(500).json({ error: 'Error en batch de subida de archivos', detalle: err.message });
   }
 });
+
 
 // Otros endpoints (uno a uno o formulario) SIN cambios, solo logs y legacy
 app.post('/upload', upload.single('file'), async (req, res) => {
