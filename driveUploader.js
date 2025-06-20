@@ -171,17 +171,19 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
 
         console.log(`🔗 Descargando archivo ${fileId} desde Salesforce: ${sfUrl}`);
-        const sfRes = await withRetries(() =>
-          fetch(sfUrl, {
-            method: 'GET',
-            const salesforceToken = await obtenerAccessTokenSalesforce(); headers: { Authorization: `Bearer ${salesforceToken}` }
-          }).then(async response => {
-            if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            return { buffer, mimeType: response.headers.get('content-type') };
-          }), 3, 1000, `Descarga Salesforce ${fileId}`
-        );
+const salesforceToken = await obtenerAccessTokenSalesforce();
+const sfRes = await withRetries(() =>
+  fetch(sfUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${salesforceToken}` }
+  }).then(async response => {
+    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return { buffer, mimeType: response.headers.get('content-type') };
+  }), 3, 1000, `Descarga Salesforce ${fileId}`
+);
+
 
         const ext = mime.extension(sfRes.mimeType) || 'bin';
         file.buffer = sfRes.buffer;
@@ -365,17 +367,18 @@ app.post('/uploadFromSalesforce', async (req, res) => {
 
       console.log(`🔗 Descargando archivo desde Salesforce: ${sfUrl}`);
 
-      const sfRes = await withRetries(() =>
-        fetch(sfUrl, {
-          method: 'GET',
-          const salesforceToken = await obtenerAccessTokenSalesforce(); headers: { Authorization: `Bearer ${salesforceToken}` }
-        }).then(async response => {
-          if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          return { buffer, mimeType: response.headers.get('content-type') };
-        }), 3, 1000, 'Descarga Salesforce'
-      );
+      const salesforceToken = await obtenerAccessTokenSalesforce();
+const sfRes = await withRetries(() =>
+  fetch(sfUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${salesforceToken}` }
+  }).then(async response => {
+    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return { buffer, mimeType: response.headers.get('content-type') };
+  }), 3, 1000, 'Descarga Salesforce'
+);
 
       const ext = mime.extension(sfRes.mimeType) || 'bin';
       const fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`)
