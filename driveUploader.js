@@ -10,7 +10,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const app = express();
 app.use(express.json({ limit: '50mb' })); // Por si mandas JSON grande de archivos
 const upload = multer({ dest: 'uploads/' });
-
+ 
 // Autenticación con Google OAuth2 
 const oauth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
