@@ -23,11 +23,11 @@ const drive = google.drive({ version: 'v3', auth: oauth2Client });
 async function obtenerAccessTokenSalesforce() {
   const params = new URLSearchParams();
   params.append('grant_type', 'refresh_token');
-  params.append('client_id', process.env.CLIENT_ID);
-  params.append('client_secret', process.env.CLIENT_SECRET);
-  params.append('refresh_token', process.env.REFRESH_TOKEN);
+  params.append('client_id', process.env.CLIENT_ID_SF);
+  params.append('client_secret', process.env.CLIENT_SECRET_SF);
+  params.append('refresh_token', process.env.REFRESH_TOKEN_SF);
 
-  const response = await fetch('https://login.salesforce.com/services/oauth2/token', {
+  const response = await fetch(`${process.env.SF_INSTANCE_URL}/services/oauth2/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params
