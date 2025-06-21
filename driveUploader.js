@@ -25,11 +25,13 @@ async function obtenerAccessTokenSalesforce() {
   params.append('grant_type', 'refresh_token');  // o "authorization_code" si usas ese flujo
   params.append('client_id', process.env.CLIENT_ID_SF);
   params.append('client_secret', process.env.CLIENT_SECRET_SF);
-  // si usas refresh_token:
   params.append('refresh_token', process.env.REFRESH_TOKEN_SF);
-  // si usas código de autorización:
-  // params.append('redirect_uri', process.env.REDIRECT_URI_SF);
-  // params.append('code', tuCódigo);
+
+  // DEBUG: mostrar los valores (menos el secreto en producción)
+  console.log('SF_INSTANCE_URL:', process.env.SF_INSTANCE_URL);
+  console.log('CLIENT_ID_SF:', process.env.CLIENT_ID_SF);
+  console.log('REFRESH_TOKEN_SF:', process.env.REFRESH_TOKEN_SF ? '***' : 'NO SET');
+  console.log('PARAMS:', params.toString());
 
   const response = await fetch(`${process.env.SF_INSTANCE_URL}/services/oauth2/token`, {
     method: 'POST',
@@ -38,12 +40,15 @@ async function obtenerAccessTokenSalesforce() {
   });
 
   if (!response.ok) {
-    throw new Error(`❌ Falló autenticación Salesforce: ${response.status}`);
+    const errorText = await response.text(); // <-- esto te da el mensaje de error real de Salesforce
+    console.error(`❌ Falló autenticación Salesforce: ${response.status} - ${errorText}`);
+    throw new Error(`❌ Falló autenticación Salesforce: ${response.status} - ${errorText}`);
   }
 
   const json = await response.json();
   return json.access_token;
 }
+
 
 // Función de reintento con logs extendidos
 async function withRetries(fn, retries = 3, delay = 1000, label = 'Operación') {
