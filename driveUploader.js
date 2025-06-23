@@ -389,10 +389,12 @@ const sfRes = await withRetries(() =>
   }), 3, 1000, 'Descarga Salesforce'
 );
 
-      const ext = mime.extension(sfRes.mimeType) || 'bin';
-      const fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`)
-        ? nombreDesdeSalesforce
-        : `${nombreDesdeSalesforce || fileId}.${ext}`;
+     const nombreBase = nombreDesdeSalesforce || fileId;
+const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
+const ext = mime.extension(sfRes.mimeType) || 'bin';
+
+// Solo agrega la extensión si no tiene ninguna
+file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${ext}`;
 
       const caseFolderId = await createCaseFolder(caseNumber);
 
