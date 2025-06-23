@@ -149,7 +149,7 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const fileType = require('file-type');
+const { fileTypeFromBuffer } = require('file-type');
 
 app.post('/uploadFromSalesforceLote', async (req, res) => {
   try {
@@ -198,7 +198,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         // 🔍 Detección robusta del tipo MIME y extensión real
        let detected;
 try {
-  detected = await fileType.fileTypeFromBuffer(sfRes.buffer);
+  detected = await fileTypeFromBuffer(sfRes.buffer);
 } catch (e) {
   console.warn(`⚠️ No se pudo detectar MIME por buffer para ${fileId}, usando fallback: ${e.message}`);
 }
