@@ -400,12 +400,12 @@ file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${ext}`;
 
       const caseFolderId = await createCaseFolder(caseNumber);
 
-      console.log(`📁 Subiendo a Drive como ${fileName}...`);
+console.log(`📁 Subiendo a Drive como ${file.fileName}...`);
 
       const uploaded = await withRetries(() =>
         drive.files.create({
           resource: {
-            name: fileName,
+            name: file.fileName,
             parents: [caseFolderId]
           },
           media: {
