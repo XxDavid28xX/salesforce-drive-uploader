@@ -196,15 +196,22 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         );
 
         // 🔍 Detección robusta del tipo MIME y extensión real
-        const detected = await fileType.fileTypeFromBuffer(sfRes.buffer);
-        const mimeTypeFinal = detected?.mime || sfRes.mimeType;
-        const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
+       let detected;
+try {
+  detected = await fileType.fileTypeFromBuffer(sfRes.buffer);
+} catch (e) {
+  console.warn(`⚠️ No se pudo detectar MIME por buffer para ${fileId}, usando fallback: ${e.message}`);
+}
 
-        const nombreBase = nombreDesdeSalesforce || fileId;
-        const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
-        file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
-        file.buffer = sfRes.buffer;
-        file.mimeType = mimeTypeFinal;
+const mimeTypeFinal = detected?.mime || sfRes.mimeType;
+const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
+
+const nombreBase = nombreDesdeSalesforce || fileId;
+const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
+file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
+file.buffer = sfRes.buffer;
+file.mimeType = mimeTypeFinal;
+
 
         file.status = 'SUCCESS';
         resultados.push({
