@@ -180,35 +180,37 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
 
         console.log(`🔗 Descargando archivo ${fileId} desde Salesforce: ${sfUrl}`);
-const salesforceToken = await obtenerAccessTokenSalesforce();
-const sfRes = await withRetries(() =>
-  fetch(sfUrl, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${salesforceToken}` }
-  }).then(async response => {
-    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return { buffer, mimeType: response.headers.get('content-type') };
-  }), 3, 1000, `Descarga Salesforce ${fileId}`
-);
+        const salesforceToken = await obtenerAccessTokenSalesforce();
+        const sfRes = await withRetries(() =>
+          fetch(sfUrl, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${salesforceToken}` }
+          }).then(async response => {
+            if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            return { buffer, mimeType: response.headers.get('content-type') };
+          }), 3, 1000, `Descarga Salesforce ${fileId}`
+        );
 
-
+        // ✅ Bloque corregido para evitar .bin innecesario
+        const nombreBase = nombreDesdeSalesforce || fileId;
+        const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
         const ext = mime.extension(sfRes.mimeType) || 'bin';
+        file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${ext}`;
         file.buffer = sfRes.buffer;
         file.mimeType = sfRes.mimeType;
-        file.fileName = nombreDesdeSalesforce?.endsWith(`.${ext}`) 
-          ? nombreDesdeSalesforce 
-          : `${nombreDesdeSalesforce || fileId}.${ext}`;
+
+        // ✅ Forzar mimeType correcto si la extensión lo indica
+        if (file.fileName.toLowerCase().endsWith('.pdf')) {
+          file.mimeType = 'application/pdf';
+        } else if (file.fileName.toLowerCase().endsWith('.jpg') || file.fileName.toLowerCase().endsWith('.jpeg')) {
+          file.mimeType = 'image/jpeg';
+        } else if (file.fileName.toLowerCase().endsWith('.png')) {
+          file.mimeType = 'image/png';
+        }
+
         file.status = 'SUCCESS';
-
-        // ✅ Forzar mimeType correcto si es PDF
-        if (file.fileName.toLowerCase().endsWith('.jpg') || file.fileName.toLowerCase().endsWith('.jpeg')) {
-  file.mimeType = 'image/jpeg';
-} else if (file.fileName.toLowerCase().endsWith('.png')) {
-  file.mimeType = 'image/png';
-}
-
         resultados.push({
           fileName: file.fileName,
           caseNumber,
@@ -290,7 +292,7 @@ const sfRes = await withRetries(() =>
     // 4️⃣ Devolver respuesta
     res.status(todosExito ? 200 : 207).json({
       status: todosExito ? 'OK' : 'INCOMPLETE',
-      success: todosExito, // <-- AGREGA ESTO
+      success: todosExito,
       folderId,
       folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
       logFile: logDriveLink,
@@ -302,7 +304,6 @@ const sfRes = await withRetries(() =>
     res.status(500).json({ error: 'Error en batch de subida de archivos', detalle: err.message });
   }
 });
-
 
 // Otros endpoints (uno a uno o formulario) SIN cambios, solo logs y legacy
 app.post('/upload', upload.single('file'), async (req, res) => {
