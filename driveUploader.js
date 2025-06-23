@@ -203,9 +203,11 @@ const sfRes = await withRetries(() =>
         file.status = 'SUCCESS';
 
         // ✅ Forzar mimeType correcto si es PDF
-        if (file.fileName.toLowerCase().endsWith('.pdf')) {
-          file.mimeType = 'application/pdf';
-        }
+        if (file.fileName.toLowerCase().endsWith('.jpg') || file.fileName.toLowerCase().endsWith('.jpeg')) {
+  file.mimeType = 'image/jpeg';
+} else if (file.fileName.toLowerCase().endsWith('.png')) {
+  file.mimeType = 'image/png';
+}
 
         resultados.push({
           fileName: file.fileName,
