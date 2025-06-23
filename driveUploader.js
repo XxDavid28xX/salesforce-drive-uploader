@@ -149,6 +149,8 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const fileType = require('file-type');
+
 app.post('/uploadFromSalesforceLote', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforceLote recibida');
@@ -193,22 +195,16 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           }), 3, 1000, `Descarga Salesforce ${fileId}`
         );
 
-        // ✅ Bloque corregido para evitar .bin innecesario
+        // 🔍 Detección robusta del tipo MIME y extensión real
+        const detected = await fileType.fileTypeFromBuffer(sfRes.buffer);
+        const mimeTypeFinal = detected?.mime || sfRes.mimeType;
+        const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
+
         const nombreBase = nombreDesdeSalesforce || fileId;
         const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
-        const ext = mime.extension(sfRes.mimeType) || 'bin';
-        file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${ext}`;
+        file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
         file.buffer = sfRes.buffer;
-        file.mimeType = sfRes.mimeType;
-
-        // ✅ Forzar mimeType correcto si la extensión lo indica
-        if (file.fileName.toLowerCase().endsWith('.pdf')) {
-          file.mimeType = 'application/pdf';
-        } else if (file.fileName.toLowerCase().endsWith('.jpg') || file.fileName.toLowerCase().endsWith('.jpeg')) {
-          file.mimeType = 'image/jpeg';
-        } else if (file.fileName.toLowerCase().endsWith('.png')) {
-          file.mimeType = 'image/png';
-        }
+        file.mimeType = mimeTypeFinal;
 
         file.status = 'SUCCESS';
         resultados.push({
@@ -305,58 +301,6 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
   }
 });
 
-// Otros endpoints (uno a uno o formulario) SIN cambios, solo logs y legacy
-app.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    console.log('📨 Nueva solicitud POST /upload recibida');
-    const parentId = req.body.parentId;
-    if (!parentId) {
-      console.warn('⚠️ parentId no proporcionado en el cuerpo de la petición');
-      return res.status(400).json({ error: 'parentId requerido' });
-    }
-
-    const caseFolderId = await createCaseFolder(parentId);
-
-    const fileMetadata = {
-      name: req.file.originalname,
-      parents: [caseFolderId]
-    };
-
-    const media = {
-      mimeType: req.file.mimetype,
-      body: fs.createReadStream(req.file.path)
-    };
-
-    const uploaded = await drive.files.create({
-      resource: fileMetadata,
-      media,
-      fields: 'id, webViewLink'
-    });
-
-    fs.unlink(req.file.path, (err) => {
-      if (err) {
-        console.error('🗑️ Error al eliminar archivo temporal:', err.message);
-      } else {
-        console.log(`🧹 Archivo temporal eliminado: ${req.file.path}`);
-      }
-    });
-
-    const folderUrl = `https://drive.google.com/drive/folders/${caseFolderId}`;
-    console.log(`✅ Archivo ${req.file.originalname} subido correctamente. Carpeta: ${folderUrl}`);
-    res.json({ url: folderUrl });
-
-  } catch (error) {
-    console.error('❌ Error en POST /upload:', error.message);
-    res.status(500).json({
-      error: 'Falló la subida del archivo',
-      detalle: error.message,
-      fileId: req.body?.fileId,
-      caseNumber: req.body?.caseNumber
-    });
-  }
-});
-
-// Endpoint legacy uno a uno (no soporta lógica de lote ni CSV)
 // Endpoint legacy uno a uno (no soporta lógica de lote ni CSV)
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
