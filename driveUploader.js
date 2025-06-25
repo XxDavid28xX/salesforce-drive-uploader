@@ -5,6 +5,8 @@ async function processInBatches(items, batchSize, processorFn) {
     await Promise.all(batch.map(processorFn));
   }
 }
+const MAX_FILE_SIZE_MB = 512; // ajusta según tu RAM/Render, Google Drive soporta mucho más
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
@@ -249,26 +251,27 @@ file.mimeType = mimeTypeFinal;
     if (todosExito) {
       folderId = await createCaseFolder(caseNumber);
 
-      for (const file of files) {
-        try {
-          console.log(`📁 Subiendo ${file.fileName} a Drive...`);
-          await withRetries(() =>
-            drive.files.create({
-              resource: {
-                name: file.fileName,
-                parents: [folderId]
-              },
-              media: {
-                mimeType: file.mimeType,
-                body: Readable.from(file.buffer)
-              },
-              fields: 'id, webViewLink'
-            }), 3, 1000, `Subida Google Drive ${file.fileName}`
-          );
-        } catch (e) {
-          console.error(`❌ Error subiendo ${file.fileName} después de la carpeta creada:`, e.message);
-        }
-      }
+      await processInBatches(files, 10, async (file) => {
+  try {
+    console.log(`📁 Subiendo ${file.fileName} a Drive...`);
+    await withRetries(() =>
+      drive.files.create({
+        resource: {
+          name: file.fileName,
+          parents: [folderId]
+        },
+        media: {
+          mimeType: file.mimeType,
+          body: Readable.from(file.buffer)
+        },
+        fields: 'id, webViewLink'
+      }), 3, 1000, `Subida Google Drive ${file.fileName}`
+    );
+  } catch (e) {
+    console.error(`❌ Error subiendo ${file.fileName} después de la carpeta creada:`, e.message);
+  }
+});
+
     }
 
     // 3️⃣ Actualiza/crea log_general.csv con todos los resultados
