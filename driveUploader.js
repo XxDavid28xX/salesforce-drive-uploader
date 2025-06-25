@@ -1,3 +1,10 @@
+async function processInBatches(items, batchSize, processorFn) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    // Procesa en paralelo los de este batch
+    await Promise.all(batch.map(processorFn));
+  }
+}
 const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
