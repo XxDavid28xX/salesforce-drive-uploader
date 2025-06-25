@@ -353,11 +353,14 @@ const sfRes = await withRetries(() =>
     if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    // VALIDACIÓN DE TAMAÑO
+    if (buffer.length > MAX_FILE_SIZE_BYTES) {
+      throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB (tamaño: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`);
+    }
     return { buffer, mimeType: response.headers.get('content-type') };
-  }), 3, 1000, 'Descarga Salesforce'
+  }), 3, 1000, `Descarga Salesforce ${fileId}`
 );
-
-     const nombreBase = nombreDesdeSalesforce || fileId;
+const nombreBase = nombreDesdeSalesforce || fileId;
 const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
 const ext = mime.extension(sfRes.mimeType) || 'bin';
 
