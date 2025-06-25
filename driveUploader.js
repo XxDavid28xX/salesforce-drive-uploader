@@ -193,16 +193,20 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
         console.log(`🔗 Descargando archivo ${fileId} desde Salesforce: ${sfUrl}`);
         const salesforceToken = await obtenerAccessTokenSalesforce();
         const sfRes = await withRetries(() =>
-          fetch(sfUrl, {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${salesforceToken}` }
-          }).then(async response => {
-            if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            return { buffer, mimeType: response.headers.get('content-type') };
-          }), 3, 1000, `Descarga Salesforce ${fileId}`
-        );
+  fetch(sfUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${salesforceToken}` }
+  }).then(async response => {
+    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    // VALIDACIÓN DE TAMAÑO
+    if (buffer.length > MAX_FILE_SIZE_BYTES) {
+      throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB (tamaño: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`);
+    }
+    return { buffer, mimeType: response.headers.get('content-type') };
+  }), 3, 1000, `Descarga Salesforce ${fileId}`
+);
 
         // 🔍 Detección robusta del tipo MIME y extensión real
        let detected;
