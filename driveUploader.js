@@ -7,7 +7,7 @@ async function processInBatches(items, batchSize, processorFn) {
 }
 const MAX_FILE_SIZE_MB = 512; // ajusta según tu RAM/Render, Google Drive soporta mucho más
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const { Readable } = require('stream');
+
 const express = require('express');
 const multer = require('multer');
 
@@ -94,9 +94,6 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const fileType = require('file-type');
-
-const { Readable } = require('stream');
 const fileType = require('file-type');
 
 app.post('/uploadFromSalesforceLote', async (req, res) => {
@@ -231,10 +228,6 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     res.status(500).json({ error: 'Error en batch de subida de archivos', detalle: err.message });
   }
 });
-
-const { Readable } = require('stream');
-const mime = require('mime-types');
-const fileType = require('file-type');
 
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
