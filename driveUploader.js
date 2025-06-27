@@ -10,7 +10,7 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const { Readable } = require('stream');
 const express = require('express');
 const multer = require('multer');
-const { google } = require('googleapis');
+
 const fs = require('fs');
 const mime = require('mime-types');
 require('dotenv').config();
@@ -19,15 +19,6 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const app = express();
 app.use(express.json({ limit: '50mb' })); // Por si mandas JSON grande de archivos
 const upload = multer({ dest: 'uploads/' });
- 
-// Autenticación con Google OAuth2 (ajustada para usar variables específicas)
-const oauth2Client = new google.auth.OAuth2(
-  process.env.CLIENT_ID_GOOGLE,
-  process.env.CLIENT_SECRET_GOOGLE,
-  process.env.REDIRECT_URI_GOOGLE
-);
-oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN_GOOGLE });
-const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
 async function obtenerAccessTokenSalesforce() {
   const params = new URLSearchParams();
