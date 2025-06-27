@@ -224,7 +224,46 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       carpetaPublica = folderUrl;
 
       try {
-        const sfPatchUrl = `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Case/${caseNumber}`;
+        // Obtener access token
+const sfUpdateToken = await obtenerAccessTokenSalesforce();
+
+// 🔍 Buscar el Id del caso por CaseNumber
+const queryUrl = `${process.env.SF_INSTANCE_URL}/services/data/v64.0/query?q=SELECT+Id+FROM+Case+WHERE+CaseNumber='${caseNumber}'`;
+const queryRes = await fetch(queryUrl, {
+  headers: { Authorization: `Bearer ${sfUpdateToken}` }
+});
+
+if (!queryRes.ok) {
+  throw new Error(`Falló búsqueda del caso en Salesforce (${queryRes.status})`);
+}
+
+const queryData = await queryRes.json();
+const caseId = queryData.records?.[0]?.Id;
+
+if (!caseId) {
+  throw new Error(`No se encontró un caso con CaseNumber ${caseNumber}`);
+}
+
+// 🔄 Ahora sí, hacer el PATCH con el Id real
+const sfPatchUrl = `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Case/${caseId}`;
+const updateBody = {
+  Subido_a_Drive__c: true,
+  External_File_URL__c: `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${folderPrefix}`
+};
+
+const patchRes = await fetch(sfPatchUrl, {
+  method: 'PATCH',
+  headers: {
+    Authorization: `Bearer ${sfUpdateToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(updateBody)
+});
+
+if (!patchRes.ok) {
+  throw new Error(`Falló actualización en Salesforce (${patchRes.status})`);
+}
+
         const updateBody = {
           Subido_a_Drive__c: true,
           External_File_URL__c: folderUrl
