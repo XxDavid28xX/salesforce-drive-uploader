@@ -77,72 +77,6 @@ async function withRetries(fn, retries = 3, delay = 1000, label = 'Operación') 
   }
 }
 
-// Crear o buscar carpeta para el caso (con búsqueda antes de crear)
-async function createCaseFolder(parentId) {
-  const folderName = String(parentId || '').trim();
-  if (!folderName) throw new Error('parentId inválido para carpeta');
-
-  try {
-    console.log(`🔍 Buscando carpeta existente para caso: "${folderName}"`);
-    const search = await drive.files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${process.env.FOLDER_ID}' in parents and trashed=false`,
-      fields: 'files(id, name)',
-      spaces: 'drive'
-    });
-
-    if (search.data.files.length > 0) {
-      const foundId = search.data.files[0].id;
-      console.log(`📂 Carpeta ya existe para caso "${folderName}": ${foundId}`);
-      return foundId;
-    }
-
-    // Si no existe, la creas
-    console.log(`📁 Carpeta NO encontrada, creando nueva para caso: "${folderName}"`);
-    const folder = await drive.files.create({
-      resource: {
-        name: folderName,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: [process.env.FOLDER_ID]
-      },
-      fields: 'id'
-    });
-
-    await drive.permissions.create({
-      fileId: folder.data.id,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone'
-      }
-    });
-
-    console.log(`🆕 Carpeta creada para caso "${folderName}": ${folder.data.id}`);
-    return folder.data.id;
-  } catch (error) {
-    console.error(`❌ Error creando/obteniendo carpeta para caso "${folderName}":`, error.message);
-    throw error;
-  }
-}
-
-// Subir un buffer a Google Drive como archivo
-async function subirArchivoBufferDrive(buffer, folderId, fileName, mimeType = 'text/csv') {
-  console.log(`📤 Subiendo archivo ${fileName} a carpeta ${folderId}`);
-  const fileMetadata = {
-    name: fileName,
-    parents: [folderId]
-  };
-  const media = {
-    mimeType,
-    body: Readable.from(buffer)
-  };
-  const uploaded = await drive.files.create({
-    resource: fileMetadata,
-    media,
-    fields: 'id, webViewLink'
-  });
-  console.log(`✅ Archivo log ${fileName} subido a ${uploaded.data.webViewLink}`);
-  return uploaded;
-}
-
 // Generar un archivo CSV a partir de resultados
 function generarCSV(resultados) {
   const encabezado = 'fileName,caseNumber,status,error\n';
@@ -162,6 +96,9 @@ async function streamToString(stream) {
 
 const fileType = require('file-type');
 
+const { Readable } = require('stream');
+const fileType = require('file-type');
+
 app.post('/uploadFromSalesforceLote', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforceLote recibida');
@@ -174,7 +111,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
 
     const resultados = [];
 
-    // 1️⃣ Validar y descargar todos los archivos primero
+    // 1️⃣ Descargar y validar cada archivo desde Salesforce
     for (const file of files) {
       const { fileId, type, fileName: nombreDesdeSalesforce } = file;
       if (!fileId || !type) {
@@ -192,41 +129,37 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
           ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${fileId}/Body`
           : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
 
-        console.log(`🔗 Descargando archivo ${fileId} desde Salesforce: ${sfUrl}`);
         const salesforceToken = await obtenerAccessTokenSalesforce();
         const sfRes = await withRetries(() =>
-  fetch(sfUrl, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${salesforceToken}` }
-  }).then(async response => {
-    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    // VALIDACIÓN DE TAMAÑO
-    if (buffer.length > MAX_FILE_SIZE_BYTES) {
-      throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB (tamaño: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`);
-    }
-    return { buffer, mimeType: response.headers.get('content-type') };
-  }), 3, 1000, `Descarga Salesforce ${fileId}`
-);
+          fetch(sfUrl, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${salesforceToken}` }
+          }).then(async response => {
+            if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            if (buffer.length > MAX_FILE_SIZE_BYTES) {
+              throw new Error(`El archivo supera el límite de ${MAX_FILE_SIZE_MB} MB`);
+            }
+            return { buffer, mimeType: response.headers.get('content-type') };
+          }), 3, 1000, `Descarga Salesforce ${fileId}`
+        );
 
-        // 🔍 Detección robusta del tipo MIME y extensión real
-       let detected;
-try {
-  detected = await fileType.fromBuffer(sfRes.buffer);
-} catch (e) {
-  console.warn(`⚠️ No se pudo detectar MIME por buffer para ${fileId}, usando fallback: ${e.message}`);
-}
+        let detected;
+        try {
+          detected = await fileType.fromBuffer(sfRes.buffer);
+        } catch (e) {
+          console.warn(`⚠️ No se pudo detectar MIME por buffer para ${fileId}: ${e.message}`);
+        }
 
-const mimeTypeFinal = detected?.mime || sfRes.mimeType;
-const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
+        const mimeTypeFinal = detected?.mime || sfRes.mimeType;
+        const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
 
-const nombreBase = nombreDesdeSalesforce || fileId;
-const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
-file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
-file.buffer = sfRes.buffer;
-file.mimeType = mimeTypeFinal;
-
+        const nombreBase = nombreDesdeSalesforce || fileId;
+        const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
+        file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
+        file.buffer = sfRes.buffer;
+        file.mimeType = mimeTypeFinal;
 
         file.status = 'SUCCESS';
         resultados.push({
@@ -249,72 +182,47 @@ file.mimeType = mimeTypeFinal;
     }
 
     const todosExito = resultados.every(r => r.status === 'SUCCESS');
-    const erroresFolder = process.env.ERRORES_FOLDER_ID;
-    let logDriveLink = null;
-    let folderId = null;
+    const folderPrefix = `casos/${caseNumber}/`;
 
-    // 2️⃣ Si todos son válidos, crear carpeta y subir archivos
+    // 2️⃣ Subir los archivos a Google Cloud Storage
     if (todosExito) {
-      folderId = await createCaseFolder(caseNumber);
-
       await processInBatches(files, 10, async (file) => {
-  try {
-    console.log(`📁 Subiendo ${file.fileName} a Drive...`);
-    await withRetries(() =>
-      drive.files.create({
-        resource: {
-          name: file.fileName,
-          parents: [folderId]
-        },
-        media: {
-          mimeType: file.mimeType,
-          body: Readable.from(file.buffer)
-        },
-        fields: 'id, webViewLink'
-      }), 3, 1000, `Subida Google Drive ${file.fileName}`
-    );
-  } catch (e) {
-    console.error(`❌ Error subiendo ${file.fileName} después de la carpeta creada:`, e.message);
-  }
-});
-
-    }
-
-    // 3️⃣ Actualiza/crea log_general.csv con todos los resultados
-    const generalLogFileName = 'log_general.csv';
-    let contenidoPrevio = '';
-    let logFileId = null;
-
-    if (erroresFolder) {
-      const generalLogs = await drive.files.list({
-        q: `name='${generalLogFileName}' and '${erroresFolder}' in parents and trashed=false`,
-        fields: 'files(id)',
-        spaces: 'drive'
+        try {
+          console.log(`☁️ Subiendo ${file.fileName} a GCS...`);
+          await withRetries(() =>
+            bucket.file(`${folderPrefix}${file.fileName}`).save(file.buffer, {
+              metadata: { contentType: file.mimeType }
+            }), 3, 1000, `Subida GCS ${file.fileName}`
+          );
+        } catch (e) {
+          console.error(`❌ Error subiendo ${file.fileName} a GCS:`, e.message);
+        }
       });
-      if (generalLogs.data.files.length > 0) {
-        logFileId = generalLogs.data.files[0].id;
-        const resp = await drive.files.get({ fileId: logFileId, alt: 'media' }, { responseType: 'stream' });
-        contenidoPrevio = await streamToString(resp.data);
-        await drive.files.delete({ fileId: logFileId });
-      }
-
-      const encabezado = 'fileName,caseNumber,status,error\n';
-      const filasNuevas = generarCSV(resultados).replace(encabezado, '');
-      const nuevoContenido = contenidoPrevio
-        ? (contenidoPrevio.endsWith('\n') ? contenidoPrevio : contenidoPrevio + '\n') + filasNuevas
-        : encabezado + filasNuevas;
-
-      const uploaded = await subirArchivoBufferDrive(Buffer.from(nuevoContenido, 'utf-8'), erroresFolder, generalLogFileName);
-      logDriveLink = uploaded.data.webViewLink;
     }
 
-    // 4️⃣ Devolver respuesta
+    // 3️⃣ Crear log_general.csv y subirlo a GCS
+    const generalLogFileName = 'log_general.csv';
+    const encabezado = 'fileName,caseNumber,status,error\n';
+    const filas = resultados.map(r =>
+      `${r.fileName},${r.caseNumber},${r.status},"${r.error ? r.error.replace(/"/g, '""') : ''}"`
+    ).join('\n');
+    const logContenido = encabezado + filas;
+
+    try {
+      const logPath = `logs/${generalLogFileName}`;
+      await bucket.file(logPath).save(Buffer.from(logContenido, 'utf-8'), {
+        metadata: { contentType: 'text/csv' }
+      });
+      console.log(`📄 Log subido a GCS: ${logPath}`);
+    } catch (e) {
+      console.error('❌ Error subiendo log_general.csv:', e.message);
+    }
+
+    // 4️⃣ Respuesta
     res.status(todosExito ? 200 : 207).json({
       status: todosExito ? 'OK' : 'INCOMPLETE',
       success: todosExito,
-      folderId,
-      folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
-      logFile: logDriveLink,
+      folderPrefix,
       resultados
     });
 
@@ -324,7 +232,10 @@ file.mimeType = mimeTypeFinal;
   }
 });
 
-// Endpoint legacy uno a uno (no soporta lógica de lote ni CSV)
+const { Readable } = require('stream');
+const mime = require('mime-types');
+const fileType = require('file-type');
+
 app.post('/uploadFromSalesforce', async (req, res) => {
   try {
     console.log('📨 Nueva solicitud POST /uploadFromSalesforce recibida');
@@ -347,61 +258,57 @@ app.post('/uploadFromSalesforce', async (req, res) => {
       console.log(`🔗 Descargando archivo desde Salesforce: ${sfUrl}`);
 
       const salesforceToken = await obtenerAccessTokenSalesforce();
-const sfRes = await withRetries(() =>
-  fetch(sfUrl, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${salesforceToken}` }
-  }).then(async response => {
-    if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    // VALIDACIÓN DE TAMAÑO
-    if (buffer.length > MAX_FILE_SIZE_BYTES) {
-      throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB (tamaño: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`);
-    }
-    return { buffer, mimeType: response.headers.get('content-type') };
-  }), 3, 1000, `Descarga Salesforce ${fileId}`
-);
-const nombreBase = nombreDesdeSalesforce || fileId;
-const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
-const ext = mime.extension(sfRes.mimeType) || 'bin';
-
-// Solo agrega la extensión si no tiene ninguna
-file.fileName = yaTieneExtension ? nombreBase : `${nombreBase}.${ext}`;
-
-      const caseFolderId = await createCaseFolder(caseNumber);
-
-console.log(`📁 Subiendo a Drive como ${file.fileName}...`);
-
-      const uploaded = await withRetries(() =>
-        drive.files.create({
-          resource: {
-            name: file.fileName,
-            parents: [caseFolderId]
-          },
-          media: {
-            mimeType: sfRes.mimeType,
-            body: Readable.from(sfRes.buffer)
-          },
-          fields: 'id, webViewLink'
-        }), 3, 1000, 'Subida Google Drive'
+      const sfRes = await withRetries(() =>
+        fetch(sfUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${salesforceToken}` }
+        }).then(async response => {
+          if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          if (buffer.length > MAX_FILE_SIZE_BYTES) {
+            throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB`);
+          }
+          return { buffer, mimeType: response.headers.get('content-type') };
+        }), 3, 1000, `Descarga Salesforce ${fileId}`
       );
 
-      console.log(`✅ Archivo ${fileName} del caso ${caseNumber} subido exitosamente a Drive`);
+      let detected;
+      try {
+        detected = await fileType.fromBuffer(sfRes.buffer);
+      } catch (e) {
+        console.warn(`⚠️ No se pudo detectar MIME por buffer: ${e.message}`);
+      }
+
+      const mimeTypeFinal = detected?.mime || sfRes.mimeType;
+      const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
+      const nombreBase = nombreDesdeSalesforce || fileId;
+      const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
+      const finalFileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
+      const folderPrefix = `casos/${caseNumber}/`;
+      const gcsPath = `${folderPrefix}${finalFileName}`;
+
+      console.log(`📁 Subiendo a GCS como ${gcsPath}...`);
+
+      await withRetries(() =>
+        bucket.file(gcsPath).save(sfRes.buffer, {
+          metadata: { contentType: mimeTypeFinal }
+        }), 3, 1000, 'Subida GCS'
+      );
+
+      console.log(`✅ Archivo ${finalFileName} del caso ${caseNumber} subido exitosamente a GCS`);
       res.json({
-        url: uploaded.data.webViewLink,
-        driveId: uploaded.data.id,
-        fileName,
+        bucketPath: gcsPath,
+        fileName: finalFileName,
         caseNumber
       });
     });
 
   } catch (err) {
     console.error('❌ Error general en /uploadFromSalesforce:', err.message);
-    res.status(500).json({ error: 'Error al subir archivo desde Salesforce' });
+    res.status(500).json({ error: 'Error al subir archivo desde Salesforce', detalle: err.message });
   }
 });
-
 
 app.get('/', (req, res) => {
   res.send('✅ Middleware activo y escuchando');
@@ -410,3 +317,4 @@ app.get('/', (req, res) => {
 app.listen(3000, () => {
   console.log('🚀 Servidor escuchando en puerto 3000');
 });
+
