@@ -1,17 +1,19 @@
 {
   "name": "salesforce-drive-uploader",
   "version": "1.0.0",
-  "description": "Middleware para subir archivos a Google Drive desde Salesforce",
+  "description": "Middleware para subir archivos a Google Cloud Storage desde Salesforce",
   "main": "driveUploader.js",
   "scripts": {
     "start": "node driveUploader.js"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.10.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "file-type": "16.5.4",
     "googleapis": "^118.0.0",
-    "multer": "^1.4.5-lts.1",
     "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1",
     "node-fetch": "^3.3.2"
   },
   "engines": {
