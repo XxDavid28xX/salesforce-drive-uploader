@@ -19,6 +19,17 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const app = express();
 app.use(express.json({ limit: '50mb' })); // Por si mandas JSON grande de archivos
 const upload = multer({ dest: 'uploads/' });
+const { Storage } = require('@google-cloud/storage');
+const path = require('path');
+const fs = require('fs');
+
+// 🧱 Reconstruye el archivo JSON desde variable de entorno base64
+const credsPath = path.join('/tmp', 'gcs-creds.json');
+fs.writeFileSync(credsPath, Buffer.from(process.env.GCS_CREDENTIALS_JSON_BASE64, 'base64'));
+
+// 📦 Inicializa cliente de GCS
+const storage = new Storage({ keyFilename: credsPath });
+const bucket = storage.bucket('NOMBRE_DE_TU_BUCKET'); // <-- Reemplaza con tu bucket real
 
 async function obtenerAccessTokenSalesforce() {
   const params = new URLSearchParams();
