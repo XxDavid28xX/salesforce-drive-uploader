@@ -180,7 +180,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     const todosExito = resultados.every(r => r.status === 'SUCCESS');
     const folderPrefix = `casos/${caseNumber}/`;
 
-    // 2️⃣ Subir los archivos a Google Cloud Storage
+    // 2️⃣ Subir a GCS
     if (todosExito) {
       await processInBatches(files, 10, async (file) => {
         try {
@@ -196,7 +196,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       });
     }
 
-    // 3️⃣ Crear log_general.csv y subirlo a GCS
+    // 3️⃣ Crear log_general.csv
     const generalLogFileName = 'log_general.csv';
     const encabezado = 'fileName,caseNumber,status,error\n';
     const filas = resultados.map(r =>
@@ -214,11 +214,48 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
       console.error('❌ Error subiendo log_general.csv:', e.message);
     }
 
-    // 4️⃣ Respuesta
+    // 4️⃣ Marcar caso en Salesforce si todo fue exitoso
+    let carpetaPublica = null;
+
+    if (todosExito) {
+      // URL pública base (ajusta si usas dominio personalizado)
+      const folderUrl = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${folderPrefix}`;
+
+      carpetaPublica = folderUrl;
+
+      try {
+        const sfPatchUrl = `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Case/${caseNumber}`;
+        const updateBody = {
+          Subido_a_Drive__c: true,
+          External_File_URL__c: folderUrl
+        };
+
+        const sfUpdateToken = await obtenerAccessTokenSalesforce();
+        const patchRes = await fetch(sfPatchUrl, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${sfUpdateToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(updateBody)
+        });
+
+        if (!patchRes.ok) {
+          throw new Error(`Falló actualización en Salesforce (${patchRes.status})`);
+        }
+
+        console.log(`✅ Caso ${caseNumber} actualizado en Salesforce.`);
+      } catch (e) {
+        console.error('❌ Error al actualizar el caso en Salesforce:', e.message);
+      }
+    }
+
+    // 5️⃣ Respuesta
     res.status(todosExito ? 200 : 207).json({
       status: todosExito ? 'OK' : 'INCOMPLETE',
       success: todosExito,
       folderPrefix,
+      carpetaPublica,
       resultados
     });
 
@@ -228,79 +265,6 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
   }
 });
 
-app.post('/uploadFromSalesforce', async (req, res) => {
-  try {
-    console.log('📨 Nueva solicitud POST /uploadFromSalesforce recibida');
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-
-    req.on('end', async () => {
-      console.log(`🧾 Payload recibido: ${data}`);
-      const { fileId, type, caseNumber, accessToken, fileName: nombreDesdeSalesforce } = JSON.parse(data);
-
-      if (!fileId || !type || !caseNumber || !accessToken) {
-        console.warn('⚠️ Parámetros faltantes en payload');
-        return res.status(400).json({ error: 'Faltan parámetros requeridos' });
-      }
-
-      const sfUrl = type === 'attachment'
-        ? `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/Attachment/${fileId}/Body`
-        : `${process.env.SF_INSTANCE_URL}/services/data/v64.0/sobjects/ContentVersion/${fileId}/VersionData`;
-
-      console.log(`🔗 Descargando archivo desde Salesforce: ${sfUrl}`);
-
-      const salesforceToken = await obtenerAccessTokenSalesforce();
-      const sfRes = await withRetries(() =>
-        fetch(sfUrl, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${salesforceToken}` }
-        }).then(async response => {
-          if (!response.ok) throw new Error(`Salesforce respondió con ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          if (buffer.length > MAX_FILE_SIZE_BYTES) {
-            throw new Error(`El archivo supera el límite permitido de ${MAX_FILE_SIZE_MB} MB`);
-          }
-          return { buffer, mimeType: response.headers.get('content-type') };
-        }), 3, 1000, `Descarga Salesforce ${fileId}`
-      );
-
-      let detected;
-      try {
-        detected = await fileType.fromBuffer(sfRes.buffer);
-      } catch (e) {
-        console.warn(`⚠️ No se pudo detectar MIME por buffer: ${e.message}`);
-      }
-
-      const mimeTypeFinal = detected?.mime || sfRes.mimeType;
-      const extFinal = detected?.ext || mime.extension(mimeTypeFinal) || 'bin';
-      const nombreBase = nombreDesdeSalesforce || fileId;
-      const yaTieneExtension = /\.[a-zA-Z0-9]{2,5}$/.test(nombreBase);
-      const finalFileName = yaTieneExtension ? nombreBase : `${nombreBase}.${extFinal}`;
-      const folderPrefix = `casos/${caseNumber}/`;
-      const gcsPath = `${folderPrefix}${finalFileName}`;
-
-      console.log(`📁 Subiendo a GCS como ${gcsPath}...`);
-
-      await withRetries(() =>
-        bucket.file(gcsPath).save(sfRes.buffer, {
-          metadata: { contentType: mimeTypeFinal }
-        }), 3, 1000, 'Subida GCS'
-      );
-
-      console.log(`✅ Archivo ${finalFileName} del caso ${caseNumber} subido exitosamente a GCS`);
-      res.json({
-        bucketPath: gcsPath,
-        fileName: finalFileName,
-        caseNumber
-      });
-    });
-
-  } catch (err) {
-    console.error('❌ Error general en /uploadFromSalesforce:', err.message);
-    res.status(500).json({ error: 'Error al subir archivo desde Salesforce', detalle: err.message });
-  }
-});
 
 app.get('/', (req, res) => {
   res.send('✅ Middleware activo y escuchando');
