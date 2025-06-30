@@ -197,23 +197,44 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     }
 
     // 3️⃣ Crear log_general.csv
-    const generalLogFileName = 'log_general.csv';
-    const encabezado = 'fileName,caseNumber,status,error\n';
-    const filas = resultados.map(r =>
-      `${r.fileName},${r.caseNumber},${r.status},"${r.error ? r.error.replace(/"/g, '""') : ''}"`
-    ).join('\n');
-    const logContenido = encabezado + filas;
+    const logPath = 'logs/log_general.csv';
+let logPrevio = '';
+try {
+  // Descarga el log previo si existe
+  const [exists] = await bucket.file(logPath).exists();
+  if (exists) {
+    const [contents] = await bucket.file(logPath).download();
+    logPrevio = contents.toString('utf-8');
+    // Quita encabezado si ya está
+    logPrevio = logPrevio.split('\n').slice(1).join('\n');
+  }
+} catch (e) {
+  console.warn('⚠️ No se pudo descargar log previo (quizá aún no existe):', e.message);
+}
 
-    try {
-      const logPath = `logs/${generalLogFileName}`;
-      await bucket.file(logPath).save(Buffer.from(logContenido, 'utf-8'), {
-        metadata: { contentType: 'text/csv' }
-      });
-      console.log(`📄 Log subido a GCS: ${logPath}`);
-    } catch (e) {
-      console.error('❌ Error subiendo log_general.csv:', e.message);
-    }
+// Prepara encabezado y filas nuevas
+const encabezado = 'fileName,caseNumber,status,error\n';
+const filas = resultados.map(r =>
+  `${r.fileName},${r.caseNumber},${r.status},"${r.error ? r.error.replace(/"/g, '""') : ''}"`
+).join('\n');
 
+// Une el contenido: encabezado una vez, luego todo el histórico
+let nuevoContenido;
+if (logPrevio.trim()) {
+  nuevoContenido = encabezado + logPrevio.trim() + '\n' + filas + '\n';
+} else {
+  nuevoContenido = encabezado + filas + '\n';
+}
+
+// Sube el archivo completo
+try {
+  await bucket.file(logPath).save(Buffer.from(nuevoContenido, 'utf-8'), {
+    metadata: { contentType: 'text/csv' }
+  });
+  console.log(`📄 Log global actualizado en GCS: ${logPath}`);
+} catch (e) {
+  console.error('❌ Error subiendo log_general.csv:', e.message);
+}
     // 4️⃣ Marcar caso en Salesforce si todo fue exitoso
     let carpetaPublica = null;
 
