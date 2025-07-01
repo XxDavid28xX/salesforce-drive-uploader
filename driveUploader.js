@@ -178,7 +178,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     }
 
     const todosExito = resultados.every(r => r.status === 'SUCCESS');
-    const folderPrefix = `casos/${caseNumber}/`;
+    const folderPrefix = `prod/casos/${caseNumber}/`;
 
     // 2️⃣ Subir a GCS
     if (todosExito) {
@@ -197,7 +197,7 @@ app.post('/uploadFromSalesforceLote', async (req, res) => {
     }
 
     // 3️⃣ Crear log_general.csv
-    const logPath = 'logs/log_general.csv';
+    const logPath = 'prod/logs/log_general.csv';
 let logPrevio = '';
 try {
   // Descarga el log previo si existe
